@@ -164,7 +164,7 @@ def test_prisma_v3_wire_frames_and_commit():
         assert url == "wss://api.vachana.ai/stt/v3/stream"
         assert additional_headers == {
             "x-api-key-id": "test-key", "model": "prisma-v3.0",
-            "language_code": "hi-IN,en-IN", "x-sample-rate": "16000", "format": "transcribe",
+            "language_code": "hi-IN", "x-sample-rate": "16000", "format": "transcribe",
         }
         socket = VendorSocket()
         socket.connected = False
@@ -340,3 +340,37 @@ def test_timbre_error_event_is_logged_without_vendor_text(caplog):
         asyncio.run(collect())
     assert "Timbre phase=synthesis error_type=ProviderErrorFrame" in caplog.text
     assert "private vendor text" not in caplog.text
+
+
+def test_prisma_initialization_reports_allowlisted_code_without_sending_audio(caplog):
+    import pytest
+
+    class VendorSocket:
+        async def recv(self):
+            return json.dumps({
+                "type": "error", "code": "SCOPE_NOT_ALLOWED",
+                "message": "private vendor text",
+            })
+
+    @asynccontextmanager
+    async def connect(url, *, additional_headers, **kwargs):
+        assert additional_headers == {
+            "x-api-key-id": "test-key", "model": "prisma-v3.0",
+            "language_code": "en-IN", "x-sample-rate": "16000",
+        }
+        yield VendorSocket()
+
+    with pytest.raises(SpeechError):
+        asyncio.run(GnaniSpeech("test-key", connector=connect)
+                    .check_prisma_initialization("en", minimal=True))
+    assert "http_status=101" in caplog.text
+    assert "provider_code=SCOPE_NOT_ALLOWED" in caplog.text
+    assert "private vendor text" not in caplog.text
+
+
+def test_prisma_error_classification_does_not_print_unknown_codes():
+    from backend.gnani_adapter import _prisma_error_code
+
+    assert _prisma_error_code({"code": "SYNTHETIC_SECRET"}) == "UNCLASSIFIED"
+    assert _prisma_error_code({"message": "STT engine failed to initialize"}) == "ENGINE_INIT_FAILED"
+    assert _prisma_error_code({"detail": {"error_code": "SCOPE_NOT_ALLOWED"}}) == "SCOPE_NOT_ALLOWED"

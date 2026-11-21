@@ -9,10 +9,11 @@ import base64
 import json
 import logging
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import Protocol
 
 from websockets.asyncio.client import connect
-from websockets.exceptions import ConnectionClosed, ConnectionClosedOK, WebSocketException
+from websockets.exceptions import ConnectionClosed, ConnectionClosedOK, InvalidStatus, WebSocketException
 
 logger = logging.getLogger("uvicorn.error").getChild("gnani")
 wire_logger = logging.getLogger(__name__ + ".wire")
@@ -46,12 +47,54 @@ class TranscriptTimeout(SpeechError):
     """Speech was detected but its final transcript did not arrive."""
 
 
+# Only known codes and locally assigned categories are safe to print.
+SAFE_ERROR_CODES = {
+    "MISSING_API_KEY", "INVALID_API_KEY", "SCOPE_NOT_ALLOWED", "RATE_LIMITED",
+    "INVALID_LANGUAGE_CODE", "INVALID_FORMAT", "INVALID_MODEL", "MODEL_NOT_AVAILABLE",
+    "MODEL_NOT_ALLOWED", "TRANSCRIPTION_FAILED",
+}
+ERROR_MESSAGES = {
+    "stt engine failed to initialize": "ENGINE_INIT_FAILED",
+    "service 'stt' not in allowed scopes": "SCOPE_NOT_ALLOWED",
+}
+
+
+def _prisma_error_code(event: dict) -> str:
+    for payload in (event, event.get("detail"), event.get("error")):
+        if not isinstance(payload, dict):
+            continue
+        for field in ("error_code", "code", "type"):
+            value = payload.get(field)
+            if isinstance(value, str) and value in SAFE_ERROR_CODES:
+                return value
+        message = payload.get("message")
+        if isinstance(message, str):
+            code = ERROR_MESSAGES.get(message.strip().casefold().rstrip("."))
+            if code:
+                return code
+    return "UNCLASSIFIED"
+
+
 def _log_failure(service: str, phase: str, exc: Exception) -> None:
     # Do not interpolate exception messages or vendor payloads. The library's
     # exception string can include headers, close reasons, and response bodies.
     response = getattr(exc, "response", None)
     http_status = getattr(response, "status_code", None)
     closed = exc.rcvd.code if isinstance(exc, ConnectionClosed) and exc.rcvd else None
+    if service == "Prisma":
+        code = getattr(exc, "provider_code", "UNCLASSIFIED")
+        if isinstance(exc, InvalidStatus) and response.body and len(response.body) <= 8192:
+            try:
+                body = json.loads(response.body)
+            except (ValueError, UnicodeError):
+                body = None
+            if isinstance(body, dict):
+                code = _prisma_error_code(body)
+        if phase != "upgrade":
+            http_status = 101
+        logger.warning("Gnani Prisma phase=%s error_type=%s http_status=%s ws_close=%s provider_code=%s",
+                       phase, type(exc).__name__, http_status, closed, code)
+        return
     logger.warning("Gnani %s phase=%s error_type=%s http_status=%s ws_close=%s",
                    service, phase, type(exc).__name__, http_status, closed)
 
@@ -151,23 +194,46 @@ class GnaniSpeech:
         self._voice = voice
         self._connect = connector
 
-    async def transcribe(self, audio: AsyncIterator[bytes], language: str) -> str:
-        other_language = "en" if language == "hi" else "hi"
+    @asynccontextmanager
+    async def _prisma_socket(self, language: str, *, minimal: bool = False):
         headers = {
             "x-api-key-id": self._api_key,
             "model": "prisma-v3.0",
-            "language_code": f"{LANGUAGE_CODES[language]},{LANGUAGE_CODES[other_language]}",
+            "language_code": LANGUAGE_CODES[language],
             "x-sample-rate": "16000",
-            "format": "transcribe",
         }
+        if not minimal:
+            headers["format"] = "transcribe"
+        async with self._connect(PRISMA_URL, additional_headers=headers,
+                                 open_timeout=10, close_timeout=1, logger=wire_logger) as socket:
+            yield socket
+
+    async def _initialize_prisma(self, socket) -> None:
+        event = json.loads(await asyncio.wait_for(socket.recv(), 10))
+        if isinstance(event, dict) and event.get("type") == "error":
+            error = ProviderErrorFrame()
+            error.provider_code = _prisma_error_code(event)
+            raise error
+        if not isinstance(event, dict) or event.get("type") != "connected":
+            raise UnexpectedEvent()
+        logger.info("Gnani Prisma phase=initialization http_status=101")
+
+    async def check_prisma_initialization(self, language: str, *, minimal: bool = False) -> None:
         phase = "upgrade"
         try:
-            async with self._connect(PRISMA_URL, additional_headers=headers,
-                                     open_timeout=10, close_timeout=1, logger=wire_logger) as socket:
+            async with self._prisma_socket(language, minimal=minimal) as socket:
                 phase = "initialization"
-                if (await asyncio.wait_for(_event(socket), 10)).get("type") != "connected":
-                    raise UnexpectedEvent()
-                logger.info("Gnani Prisma phase=initialization http_status=101")
+                await self._initialize_prisma(socket)
+        except (SpeechError, OSError, WebSocketException, ValueError, TypeError) as exc:
+            _log_failure("Prisma", phase, exc)
+            raise SpeechError() from None
+
+    async def transcribe(self, audio: AsyncIterator[bytes], language: str) -> str:
+        phase = "upgrade"
+        try:
+            async with self._prisma_socket(language) as socket:
+                phase = "initialization"
+                await self._initialize_prisma(socket)
                 phase = "stream"
                 committed = asyncio.Event()
 
