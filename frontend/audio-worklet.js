@@ -1,74 +1,66 @@
-
-class AudioProcessor extends AudioWorkletProcessor {
-  constructor() {
-    super();
-
-    this.targetRate = 16000;
-    this.nextSamplePosition = 0;
-    this.inputPosition = 0;
-    this.previousSample = 0;
-    this.hasPreviousSample = false;
-
-    this.outputSamples = [];
-    this.chunkSize = 1600;
-  }
-
-  process(inputs, outputs) {
-    const input = inputs[0];
-
-    if (!input || !input[0]) {
-      return true;
+﻿class PCMProcessor extends AudioWorkletProcessor {
+    constructor() {
+        super();
+        this.inputBuffer = [];
+        this.outputBuffer = [];
+        this.targetRate = 16000;
+        this.outputFrameSize = 512;
+        this.ratio = sampleRate / this.targetRate;
+        this.position = 0;
     }
 
-    const channel = input[0];
-    const step = sampleRate / this.targetRate;
+    process(inputs) {
+        const input = inputs[0];
 
-    for (let i = 0; i < channel.length; i++) {
-      const currentSample = channel[i];
-      const currentPosition = this.inputPosition;
+        if (!input || !input[0]) {
+            return true;
+        }
 
-      if (!this.hasPreviousSample) {
-        this.previousSample = currentSample;
-        this.hasPreviousSample = true;
-        this.inputPosition++;
-        this.nextSamplePosition = 0;
-        continue;
-      }
+        const samples = input[0];
 
-      while (this.nextSamplePosition <= currentPosition) {
-        const fraction =
-          this.nextSamplePosition - (currentPosition - 1);
+        for (let i = 0; i < samples.length; i++) {
+            this.inputBuffer.push(samples[i]);
+        }
 
-        const sample =
-          this.previousSample +
-          (currentSample - this.previousSample) * fraction;
+        while (this.position + 1 < this.inputBuffer.length) {
+            const index = Math.floor(this.position);
+            const fraction = this.position - index;
 
-        const clipped = Math.max(-1, Math.min(1, sample));
+            const sample =
+                this.inputBuffer[index] * (1 - fraction) +
+                this.inputBuffer[index + 1] * fraction;
 
-        const pcmSample =
-          clipped < 0
-            ? clipped * 32768
-            : clipped * 32767;
+            const clamped = Math.max(-1, Math.min(1, sample));
 
-        this.outputSamples.push(Math.round(pcmSample));
+            this.outputBuffer.push(
+                clamped < 0
+                    ? Math.round(clamped * 32768)
+                    : Math.round(clamped * 32767)
+            );
 
-        this.nextSamplePosition += step;
-      }
+            this.position += this.ratio;
+        }
 
-      this.previousSample = currentSample;
-      this.inputPosition++;
+        const consumed = Math.floor(this.position);
 
-      if (this.outputSamples.length >= this.chunkSize) {
-        const chunk = new Int16Array(this.outputSamples);
+        if (consumed > 0) {
+            this.inputBuffer.splice(0, consumed);
+            this.position -= consumed;
+        }
 
-        this.port.postMessage(chunk.buffer, [chunk.buffer]);
+        while (this.outputBuffer.length >= this.outputFrameSize) {
+            const frame = this.outputBuffer.splice(
+                0,
+                this.outputFrameSize
+            );
 
-        this.outputSamples = [];
-      }
+            const pcm = new Int16Array(frame);
+
+            this.port.postMessage(pcm.buffer, [pcm.buffer]);
+        }
+
+        return true;
     }
-
-    return true;
-  }
 }
 
-registerProcessor("audio-processor", AudioProcessor);
+registerProcessor("pcm-processor", PCMProcessor);

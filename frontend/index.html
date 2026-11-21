@@ -1,42 +1,48 @@
-
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="theme-color" content="#123456">
-  <title>Voice Field Register</title>
-  <link rel="stylesheet" href="styles.css">
-  <link rel="manifest" href="manifest.json">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#123b35">
+    <title>Gnani Voice Field Register</title>
+    <link rel="manifest" href="/manifest.json">
+    <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
+    <main class="app">
+        <header>
+            <h1>Gnani Voice Field Register</h1>
+            <p>AI-powered voice assistance for field visits</p>
+        </header>
 
-  <main class="container">
-    <h1>Voice Field Register</h1>
-    <p>AI-powered field visit assistant</p>
+        <section class="panel">
+            <label for="language">Choose language</label>
+            <select id="language">
+                <option value="en">English</option>
+                <option value="hi">Hindi</option>
+            </select>
 
-    <label for="language">Choose Language</label>
-    <select id="language">
-      <option value="en">English</option>
-      <option value="hi">Hindi</option>
-    </select>
+            <button id="connectBtn">Connect</button>
+            <button id="micBtn" disabled>Start speaking</button>
+            <button id="stopBtn" disabled>Stop</button>
 
-    <p id="status">Ready to connect</p>
+            <p id="status">Not connected</p>
+        </section>
 
-    <button id="startBtn">Start Recording</button>
-    <button id="stopBtn" disabled>Stop Recording</button>
+        <section class="panel">
+            <h2>Conversation</h2>
+            <div id="conversation" aria-live="polite">
+                <p>Your conversation will appear here.</p>
+            </div>
+        </section>
 
-    <section>
-      <h2>Transcript</h2>
-      <p id="transcript">Your conversation will appear here.</p>
-    </section>
+        <section class="panel">
+            <h2>Visit details</h2>
+            <pre id="visitDetails">No visit details yet.</pre>
+            <p id="dangerStatus">No safety alert.</p>
+        </section>
+    </main>
 
-    <section>
-      <h2>Visit Details</h2>
-      <div id="visitDetails">No details received yet.</div>
-    </section>
-  </main>
-
-  <script src="app.js"></script>
+    <script src="/app.js"></script>
 </body>
 </html>
