@@ -47,6 +47,7 @@ class Session:
         "danger_flag": False, "latency_ms": None, "follow_ups": [],
     })
     expiry: asyncio.TimerHandle | None = None
+    owner: str | None = None
 
 
 @dataclass
@@ -150,6 +151,7 @@ class Connection:
             async with asyncio.timeout(45), aclosing(utterance.chunks()) as chunks:
                 text = await self.provider.transcribe(chunks, self.session.language)
             final_at = monotonic()
+            utterance.ended_at = utterance.ended_at or utterance.last_audio_at
         except (SpeechError, TimeoutError):
             await self.error("STT_UNAVAILABLE")
             return
@@ -246,6 +248,7 @@ def create_app(
     session_factory: Callable[[str, str], Any] | None = None,
     handle_turn: TurnHandler | None = None,
     demo_mode: bool = False,
+    authorize: Callable[[WebSocket], str | None] | None = None,
 ) -> FastAPI:
     """Inject Role B's session factory and an async turn handler wired to Role D."""
     app = FastAPI()
@@ -263,6 +266,10 @@ def create_app(
             if origin != f"{scheme}://{websocket.headers.get('host')}":
                 await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
                 return
+        owner = authorize(websocket) if authorize else None
+        if authorize and owner is None:
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+            return
         await websocket.accept()
         connection = None
         try:
@@ -285,12 +292,12 @@ def create_app(
                             return
                         language = message["language"]
                         dialogue = session_factory(session_id, language) if session_factory else None
-                        session = sessions[session_id] = Session(session_id, language, dialogue)
+                        session = sessions[session_id] = Session(session_id, language, dialogue, owner=owner)
                     elif kind == "resume":
                         version = message.get("draft_version")
                         if type(version) is not int or version < 0:
                             raise ValueError()
-                        if session is None or session.expiry is None:
+                        if session is None or session.expiry is None or session.owner != owner:
                             await reject_session(websocket, "SESSION_NOT_RESUMABLE")
                             return
                         session.expiry.cancel()

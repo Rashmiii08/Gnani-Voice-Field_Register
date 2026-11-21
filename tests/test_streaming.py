@@ -155,18 +155,26 @@ def test_prisma_v3_wire_frames_and_commit():
                 self.connected = True
                 return json.dumps({"type": "connected"})
             await self.committed.wait()
-            return json.dumps({"type": "transcript", "text": "Synthetic visit", "is_final": True})
+            if not self.transcripts:
+                await asyncio.Future()
+            return json.dumps(self.transcripts.pop(0))
 
     @asynccontextmanager
     async def connect(url, *, additional_headers, **kwargs):
         assert url == "wss://api.vachana.ai/stt/v3/stream"
         assert additional_headers == {
             "x-api-key-id": "test-key", "model": "prisma-v3.0",
-            "language_code": "hi-IN,en-IN", "x-sample-rate": "16000", "format": "codemix",
+            "language_code": "hi-IN,en-IN", "x-sample-rate": "16000", "format": "transcribe",
         }
         socket = VendorSocket()
         socket.connected = False
         socket.committed = asyncio.Event()
+        socket.transcripts = [
+            {"type": "processing"},
+            {"type": "transcript", "text": "Synthetic", "segment_id": "1", "is_final": True},
+            {"type": "transcript", "text": "Synthetic", "segment_id": "1", "is_final": True},
+            {"type": "transcript", "text": "visit", "segment_id": "2", "is_final": True},
+        ]
         yield socket
 
     async def chunks():

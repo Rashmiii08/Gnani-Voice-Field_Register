@@ -57,11 +57,52 @@ async def _send_audio(socket, audio: AsyncIterator[bytes]) -> None:
     await socket.send(json.dumps({"type": "commit"}))
 
 
-async def _receive_transcript(socket) -> str:
-    while True:
-        event = await _event(socket)
-        if event.get("type") == "transcript":
-            return event["text"].strip()
+async def _receive_transcripts(socket, committed: asyncio.Event) -> str:
+    segments = []
+    seen = set()
+    pending = 0
+    read = asyncio.create_task(_event(socket))
+    commit = asyncio.create_task(committed.wait())
+    loop = asyncio.get_running_loop()
+    try:
+        while not commit.done():
+            await asyncio.wait((read, commit), return_when=asyncio.FIRST_COMPLETED)
+            if read.done():
+                pending = _collect_segment(read.result(), segments, seen, pending)
+                read = asyncio.create_task(_event(socket))
+
+        # Prisma documents commit but provides no end-of-stream acknowledgment.
+        # Allow outstanding transcription to finish, then drain a short quiet window.
+        deadline = loop.time() + 8
+        while (remaining := deadline - loop.time()) > 0:
+            wait = remaining if pending or not segments else min(0.7, remaining)
+            done, _ = await asyncio.wait((read,), timeout=wait)
+            if not done:
+                break
+            pending = _collect_segment(read.result(), segments, seen, pending)
+            read = asyncio.create_task(_event(socket))
+        if pending:
+            raise SpeechError()
+        return " ".join(text for text in segments if text)
+    finally:
+        read.cancel()
+        commit.cancel()
+        await asyncio.gather(read, commit, return_exceptions=True)
+
+
+def _collect_segment(event, segments, seen, pending):
+    kind = event.get("type")
+    if kind == "processing":
+        return pending + 1
+    if kind != "transcript" or event.get("is_final") is False:
+        return pending
+    segment_id = event.get("segment_id")
+    if segment_id and segment_id in seen:
+        return pending
+    if segment_id:
+        seen.add(segment_id)
+    segments.append(event["text"].strip())
+    return max(pending - 1, 0)
 
 
 class GnaniSpeech:
@@ -77,20 +118,26 @@ class GnaniSpeech:
             "model": "prisma-v3.0",
             "language_code": f"{LANGUAGE_CODES[language]},{LANGUAGE_CODES[other_language]}",
             "x-sample-rate": "16000",
-            "format": "codemix",
+            "format": "transcribe",
         }
         try:
             async with self._connect(PRISMA_URL, additional_headers=headers,
                                      open_timeout=5, close_timeout=1) as socket:
                 if (await asyncio.wait_for(_event(socket), 5)).get("type") != "connected":
                     raise SpeechError()
-                sender = asyncio.create_task(_send_audio(socket, audio))
-                receiver = asyncio.create_task(_receive_transcript(socket))
+                committed = asyncio.Event()
+
+                async def send():
+                    await _send_audio(socket, audio)
+                    committed.set()
+
+                sender = asyncio.create_task(send())
+                receiver = asyncio.create_task(_receive_transcripts(socket, committed))
                 try:
                     await asyncio.wait((sender, receiver), return_when=asyncio.FIRST_COMPLETED)
                     if sender.done():
                         sender.result()
-                        return await asyncio.wait_for(receiver, 8)
+                        return await receiver
                     return receiver.result()
                 finally:
                     sender.cancel()

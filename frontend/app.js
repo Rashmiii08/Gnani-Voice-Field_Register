@@ -23,7 +23,7 @@ const copy = {
     offline: "Offline. Recording requires a connection.", disconnected: "Disconnected. Select Start Recording to retry.",
     microphone: "Microphone unavailable. Check permission and your input device.",
     playback: "Playback unavailable. Select Start Recording to enable audio.",
-    retry: "Please reconnect or retry.", expired: "The previous session expired. Start a new visit.",
+    retry: "Please reconnect or retry.", stt: "Speech recognition unavailable. Check the connection and Gnani access.", tts: "Voice playback from Gnani is unavailable. You can still read the transcript.", expired: "The previous session expired. Start a new visit.",
     lostRecording: "The interrupted recording was discarded. Please record it again.",
     pending: "Awaiting confirmation. Review the beneficiary ID and visit details.",
     saved: "Visit saved", listening: "Listening for visit details",
@@ -41,7 +41,7 @@ const copy = {
     offline: "ऑफ़लाइन। रिकॉर्डिंग के लिए कनेक्शन चाहिए।", disconnected: "कनेक्शन टूट गया। दोबारा रिकॉर्डिंग शुरू करें।",
     microphone: "माइक्रोफ़ोन उपलब्ध नहीं है। अनुमति और डिवाइस की जाँच करें।",
     playback: "ऑडियो सुनने के लिए रिकॉर्डिंग शुरू करें चुनें।",
-    retry: "फिर से कनेक्ट करें या दोबारा कोशिश करें।", expired: "पिछला सत्र समाप्त हो गया। नई विज़िट शुरू करें।",
+    retry: "फिर से कनेक्ट करें या दोबारा कोशिश करें।", stt: "बोली पहचान उपलब्ध नहीं है। कनेक्शन और Gnani की पहुँच जाँचें।", tts: "Gnani ऑडियो उपलब्ध नहीं है। आप बातचीत का पाठ पढ़ सकते हैं।", expired: "पिछला सत्र समाप्त हो गया। नई विज़िट शुरू करें।",
     lostRecording: "बीच में रुकी रिकॉर्डिंग हटा दी गई। फिर से रिकॉर्ड करें।",
     pending: "पुष्टि बाकी है। लाभार्थी आईडी और विज़िट का विवरण जाँचें।",
     saved: "विज़िट सहेजी गई", listening: "विज़िट का विवरण सुनने के लिए तैयार",
@@ -218,8 +218,11 @@ function onMessage(message) {
       waiting = false;
       releaseCapture();
     }
-    showError(message.code === "NO_SPEECH" ? "noSpeech" :
-      message.code === "SESSION_NOT_RESUMABLE" ? "expired" : "retry");
+    const errors = {
+      NO_SPEECH: "noSpeech", SESSION_NOT_RESUMABLE: "expired",
+      STT_UNAVAILABLE: "stt", TTS_UNAVAILABLE: "tts",
+    };
+    showError(errors[message.code] || "retry");
     if (ready) setStatus(capture ? "recording" : waiting ? "processing" : "ready");
   }
 }
