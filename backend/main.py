@@ -6,10 +6,12 @@ import os
 from collections.abc import Awaitable, Callable
 from contextlib import aclosing
 from dataclasses import dataclass, field
+from pathlib import Path
 from time import monotonic
 from typing import Any
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, status
+from fastapi.staticfiles import StaticFiles
 
 from backend.gnani_adapter import GnaniSpeech, SpeechError, SpeechProvider
 
@@ -153,6 +155,7 @@ class Connection:
             return
 
         if not text:
+            await self.error("NO_SPEECH")
             return
         await self.send({"type": "transcript", "text": text, "final": True})
         if self.handle_turn is None:
@@ -242,13 +245,24 @@ def create_app(
     *,
     session_factory: Callable[[str, str], Any] | None = None,
     handle_turn: TurnHandler | None = None,
+    demo_mode: bool = False,
 ) -> FastAPI:
     """Inject Role B's session factory and an async turn handler wired to Role D."""
     app = FastAPI()
     sessions: dict[str, Session] = {}
 
+    @app.get("/runtime-mode")
+    async def runtime_mode() -> dict[str, bool]:
+        return {"demo": demo_mode}
+
     @app.websocket("/ws")
     async def websocket_endpoint(websocket: WebSocket) -> None:
+        origin = websocket.headers.get("origin")
+        if origin:
+            scheme = "https" if websocket.url.scheme == "wss" else "http"
+            if origin != f"{scheme}://{websocket.headers.get('host')}":
+                await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+                return
         await websocket.accept()
         connection = None
         try:
@@ -313,6 +327,9 @@ def create_app(
                     SESSION_TTL, sessions.pop, connection.session.session_id, None
                 )
 
+    frontend = Path(__file__).resolve().parents[1] / "frontend"
+    if frontend.is_dir():
+        app.mount("/", StaticFiles(directory=frontend, html=True), name="frontend")
     return app
 
 

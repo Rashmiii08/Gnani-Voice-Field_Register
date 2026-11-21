@@ -259,3 +259,29 @@ def test_dialogue_failure_keeps_websocket_available():
             socket.send_json({"type": "audio", "data": "AQA=", "seq": 2})
             socket.send_json({"type": "end_utterance"})
             assert socket.receive_json()["type"] == "transcript"
+
+
+def test_browser_websocket_accepts_same_origin_and_rejects_other_origins():
+    from fastapi import WebSocketDisconnect
+    import pytest
+
+    with TestClient(create_app()) as client:
+        with pytest.raises(WebSocketDisconnect) as rejected:
+            with client.websocket_connect("/ws", headers={"origin": "https://outside.example"}):
+                pass
+        assert rejected.value.code == 1008
+        with client.websocket_connect("/ws", headers={"origin": "http://testserver"}) as socket:
+            start(socket)
+
+
+def test_local_frontend_serves_same_origin_and_discloses_demo_mode():
+    from backend.demo import app as demo_app
+
+    with TestClient(demo_app) as client:
+        assert client.get("/runtime-mode").json() == {"demo": True}
+        assert client.get("/").status_code == 200
+        assert client.get("/audio-worklet.js").status_code == 200
+        assert client.get("/.env").status_code == 404
+        assert client.get("/backend/main.py").status_code == 404
+    with TestClient(create_app()) as client:
+        assert client.get("/runtime-mode").json() == {"demo": False}

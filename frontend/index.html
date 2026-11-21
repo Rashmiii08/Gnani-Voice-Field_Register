@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#123456">
+  <title>Voice Field Register</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="manifest" href="manifest.json">
+</head>
+<body>
+  <main class="container">
+    <header>
+      <h1 data-label="title">Voice Field Register</h1>
+      <p data-label="intro">Use synthetic patient information only.</p>
+    </header>
+    <p id="demoMode" hidden data-label="demo">Simulation. Recording triggers a scripted transcript and test tones. Visits are previews only.</p>
+    <label for="language" data-label="language">Language</label>
+    <select id="language">
+      <option value="en">English</option>
+      <option value="hi" lang="hi">हिन्दी</option>
+    </select>
+
+    <p id="status" role="status">Ready to connect</p>
+    <p id="error" role="alert" hidden></p>
+    <div class="controls">
+      <button id="startBtn" data-label="start">Start Recording</button>
+      <button id="stopBtn" data-label="stop" disabled>Stop Recording</button>
+      <button id="interruptBtn" data-label="interrupt" class="secondary" disabled>Interrupt playback</button>
+      <button id="resetBtn" data-label="reset" class="secondary" disabled>New visit</button>
+    </div>
+
+    <p id="danger" role="alert" hidden data-label="danger">Possible danger sign. Follow the approved local referral protocol.</p>
+
+    <section>
+      <h2 data-label="visit">Visit details</h2>
+      <p id="visitState" role="status"></p>
+      <dl id="visitDetails"></dl>
+      <ul id="followUps" aria-label="Follow-ups"></ul>
+    </section>
+
+    <section>
+      <h2 data-label="transcript">Transcript</h2>
+      <ol id="transcript" aria-live="polite"></ol>
+    </section>
+  </main>
+  <script src="app.js" defer></script>
+</body>
+</html>
