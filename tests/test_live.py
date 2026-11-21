@@ -124,3 +124,14 @@ def test_hindi_identity_and_number_extraction():
 
     result = extract_fields("सामान्य विज़िट डेमो १२३। वज़न ५५ किलो।", None, None, None)
     assert result.patch == {"beneficiary_id": "DEMO-123", "visit_type": "other", "weight_kg": 55}
+
+
+def test_manifest_requests_operator_credentials_without_making_routes_public(storage):
+    app = create_live_app(provider=ScriptedSpeech([]), password="synthetic-test", db_path=storage)
+    with TestClient(app) as client:
+        assert client.get("/manifest.json").status_code == 401
+        assert client.get("/runtime-mode").status_code == 401
+        login(client)
+        page = client.get("/")
+        assert 'rel="manifest" href="manifest.json" crossorigin="use-credentials"' in page.text
+        assert client.get("/manifest.json").status_code == 200

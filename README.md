@@ -33,6 +33,18 @@ Open <http://127.0.0.1:8765/> and sign in as `operator` using the password you j
 
 Use synthetic information only. A spoken ID beginning with “Demo” and a visit type are required before confirmation. A different beneficiary ID requires a new visit. Extraction recognizes explicit fields in a limited English/Hindi vocabulary, including ISO dates and named vaccines. Free-text conditions such as “has sugar” are outside the structured form.
 
+## Check live Gnani access
+
+In the PowerShell terminal that has `GNANI_API_KEY`, run:
+
+```powershell
+.\.venv\Scripts\python.exe -m scripts.check_gnani
+```
+
+The check asks Timbre to synthesize a fixed synthetic phrase and sends the returned audio to Prisma. It keeps the audio in memory and prints only the result. If Timbre fails, the Prisma check still attempts the connection with silence.
+
+On failure, use the `Gnani Prisma` or `Gnani Timbre` diagnostic line. `InvalidStatus` with HTTP 401 is an upstream authentication rejection. `InvalidProxyStatus` indicates a proxy rejected the connection. `ProviderErrorFrame` indicates Gnani accepted the WebSocket upgrade and then sent an error. The diagnostic includes the phase, error class, and available numeric HTTP or close status. Header values, payloads, and close reasons are excluded.
+
 ## Simulation and tests
 
 Simulation produces scripted transcripts and test tones without credentials.

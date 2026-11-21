@@ -171,6 +171,7 @@ def test_prisma_v3_wire_frames_and_commit():
         socket.committed = asyncio.Event()
         socket.transcripts = [
             {"type": "processing"},
+            {"type": "processing"},
             {"type": "transcript", "text": "Synthetic", "segment_id": "1", "is_final": True},
             {"type": "transcript", "text": "Synthetic", "segment_id": "1", "is_final": True},
             {"type": "transcript", "text": "visit", "segment_id": "2", "is_final": True},
@@ -293,3 +294,49 @@ def test_local_frontend_serves_same_origin_and_discloses_demo_mode():
         assert client.get("/backend/main.py").status_code == 404
     with TestClient(create_app()) as client:
         assert client.get("/runtime-mode").json() == {"demo": False}
+
+
+def test_gnani_upgrade_failure_logs_status_without_response_data(caplog):
+    import pytest
+    from websockets.datastructures import Headers
+    from websockets.exceptions import InvalidStatus
+    from websockets.http11 import Response
+
+    @asynccontextmanager
+    async def rejected(url, **kwargs):
+        assert kwargs["additional_headers"]["x-api-key-id"] == "synthetic-secret"
+        raise InvalidStatus(Response(401, "Unauthorized", Headers(), bytearray(b"private data")))
+        yield  # async contextmanager on the failure path
+
+    async def chunks():
+        yield bytes(1024)
+
+    with pytest.raises(SpeechError):
+        asyncio.run(GnaniSpeech(" synthetic-secret ", connector=rejected).transcribe(chunks(), "en"))
+    assert "Prisma phase=upgrade error_type=InvalidStatus http_status=401" in caplog.text
+    assert "synthetic-secret" not in caplog.text
+    assert "private data" not in caplog.text
+
+
+def test_timbre_error_event_is_logged_without_vendor_text(caplog):
+    import pytest
+
+    class VendorSocket:
+        async def send(self, frame):
+            pass
+
+        async def recv(self):
+            return json.dumps({"type": "error", "message": "private vendor text"})
+
+    @asynccontextmanager
+    async def connect(url, **kwargs):
+        yield VendorSocket()
+
+    async def collect():
+        return [chunk async for chunk in GnaniSpeech("test-key", connector=connect)
+                .synthesize("Synthetic", "en")]
+
+    with pytest.raises(SpeechError):
+        asyncio.run(collect())
+    assert "Timbre phase=synthesis error_type=ProviderErrorFrame" in caplog.text
+    assert "private vendor text" not in caplog.text

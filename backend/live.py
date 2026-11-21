@@ -27,7 +27,7 @@ COOKIE_LIFETIME = 8 * 3600
 
 def create_live_app(*, provider=None, password=None, db_path=None):
     if provider is None:
-        key = os.getenv("GNANI_API_KEY")
+        key = os.getenv("GNANI_API_KEY", "").strip()
         if not key:
             raise RuntimeError("Set GNANI_API_KEY in the terminal that starts Uvicorn.")
         provider = GnaniSpeech(key, os.getenv("GNANI_TTS_VOICE", "Shivani"))

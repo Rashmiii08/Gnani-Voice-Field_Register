@@ -7,11 +7,16 @@ https://docs.gnani.ai/api/TTS/tts-websocket
 import asyncio
 import base64
 import json
+import logging
 from collections.abc import AsyncIterator
 from typing import Protocol
 
 from websockets.asyncio.client import connect
-from websockets.exceptions import WebSocketException
+from websockets.exceptions import ConnectionClosed, ConnectionClosedOK, WebSocketException
+
+logger = logging.getLogger("uvicorn.error").getChild("gnani")
+wire_logger = logging.getLogger(__name__ + ".wire")
+wire_logger.setLevel(logging.WARNING)
 
 PRISMA_URL = "wss://api.vachana.ai/stt/v3/stream"
 TIMBRE_URL = "wss://api.vachana.ai/api/v1/tts"
@@ -29,10 +34,34 @@ class SpeechError(Exception):
     """An upstream failure safe to map to a generic client error."""
 
 
+class ProviderErrorFrame(SpeechError):
+    """The upstream sent its documented error event."""
+
+
+class UnexpectedEvent(SpeechError):
+    """An upstream message did not match the expected schema."""
+
+
+class TranscriptTimeout(SpeechError):
+    """Speech was detected but its final transcript did not arrive."""
+
+
+def _log_failure(service: str, phase: str, exc: Exception) -> None:
+    # Do not interpolate exception messages or vendor payloads. The library's
+    # exception string can include headers, close reasons, and response bodies.
+    response = getattr(exc, "response", None)
+    http_status = getattr(response, "status_code", None)
+    closed = exc.rcvd.code if isinstance(exc, ConnectionClosed) and exc.rcvd else None
+    logger.warning("Gnani %s phase=%s error_type=%s http_status=%s ws_close=%s",
+                   service, phase, type(exc).__name__, http_status, closed)
+
+
 async def _event(socket) -> dict:
     message = json.loads(await socket.recv())
-    if not isinstance(message, dict) or message.get("type") == "error":
-        raise SpeechError()
+    if not isinstance(message, dict):
+        raise UnexpectedEvent()
+    if message.get("type") == "error":
+        raise ProviderErrorFrame()
     return message
 
 
@@ -60,7 +89,7 @@ async def _send_audio(socket, audio: AsyncIterator[bytes]) -> None:
 async def _receive_transcripts(socket, committed: asyncio.Event) -> str:
     segments = []
     seen = set()
-    pending = 0
+    pending = False
     read = asyncio.create_task(_event(socket))
     commit = asyncio.create_task(committed.wait())
     loop = asyncio.get_running_loop()
@@ -79,10 +108,16 @@ async def _receive_transcripts(socket, committed: asyncio.Event) -> str:
             done, _ = await asyncio.wait((read,), timeout=wait)
             if not done:
                 break
-            pending = _collect_segment(read.result(), segments, seen, pending)
+            try:
+                event = read.result()
+            except ConnectionClosedOK:
+                if segments and not pending:
+                    break
+                raise
+            pending = _collect_segment(event, segments, seen, pending)
             read = asyncio.create_task(_event(socket))
         if pending:
-            raise SpeechError()
+            raise TranscriptTimeout()
         return " ".join(text for text in segments if text)
     finally:
         read.cancel()
@@ -93,7 +128,9 @@ async def _receive_transcripts(socket, committed: asyncio.Event) -> str:
 def _collect_segment(event, segments, seen, pending):
     kind = event.get("type")
     if kind == "processing":
-        return pending + 1
+        # Anonymous status messages don't provide a segment ID and cannot
+        # be counted as independent promises of a final transcript.
+        return True
     if kind != "transcript" or event.get("is_final") is False:
         return pending
     segment_id = event.get("segment_id")
@@ -101,13 +138,16 @@ def _collect_segment(event, segments, seen, pending):
         return pending
     if segment_id:
         seen.add(segment_id)
-    segments.append(event["text"].strip())
-    return max(pending - 1, 0)
+    text = event.get("text")
+    if not isinstance(text, str):
+        raise UnexpectedEvent()
+    segments.append(text.strip())
+    return False
 
 
 class GnaniSpeech:
     def __init__(self, api_key: str, voice: str = "Shivani", *, connector=connect):
-        self._api_key = api_key
+        self._api_key = api_key.strip()
         self._voice = voice
         self._connect = connector
 
@@ -120,15 +160,21 @@ class GnaniSpeech:
             "x-sample-rate": "16000",
             "format": "transcribe",
         }
+        phase = "upgrade"
         try:
             async with self._connect(PRISMA_URL, additional_headers=headers,
-                                     open_timeout=5, close_timeout=1) as socket:
-                if (await asyncio.wait_for(_event(socket), 5)).get("type") != "connected":
-                    raise SpeechError()
+                                     open_timeout=10, close_timeout=1, logger=wire_logger) as socket:
+                phase = "initialization"
+                if (await asyncio.wait_for(_event(socket), 10)).get("type") != "connected":
+                    raise UnexpectedEvent()
+                logger.info("Gnani Prisma phase=initialization http_status=101")
+                phase = "stream"
                 committed = asyncio.Event()
 
                 async def send():
+                    nonlocal phase
                     await _send_audio(socket, audio)
+                    phase = "final_transcript"
                     committed.set()
 
                 sender = asyncio.create_task(send())
@@ -143,8 +189,9 @@ class GnaniSpeech:
                     sender.cancel()
                     receiver.cancel()
                     await asyncio.gather(sender, receiver, return_exceptions=True)
-        except (OSError, TimeoutError, WebSocketException, ValueError, KeyError, AttributeError) as exc:
-            raise SpeechError() from exc
+        except (SpeechError, OSError, TimeoutError, WebSocketException, ValueError, TypeError) as exc:
+            _log_failure("Prisma", phase, exc)
+            raise SpeechError() from None
 
     async def synthesize(self, text: str, language: str) -> AsyncIterator[bytes]:
         request = {
@@ -161,9 +208,12 @@ class GnaniSpeech:
             },
         }
         headers = {"X-API-Key-ID": self._api_key}
+        phase = "upgrade"
         try:
             async with self._connect(TIMBRE_URL, additional_headers=headers,
-                                     open_timeout=5, close_timeout=1) as socket:
+                                     open_timeout=10, close_timeout=1, logger=wire_logger) as socket:
+                logger.info("Gnani Timbre phase=upgrade http_status=101")
+                phase = "synthesis"
                 await socket.send(json.dumps(request))
                 while True:
                     event = await asyncio.wait_for(_event(socket), 8)
@@ -172,8 +222,9 @@ class GnaniSpeech:
                     if event.get("type") == "audio":
                         pcm = base64.b64decode(event["data"]["audio"], validate=True)
                         if len(pcm) % 2:
-                            raise SpeechError()
+                            raise UnexpectedEvent()
                         if pcm:
                             yield pcm
-        except (OSError, TimeoutError, WebSocketException, ValueError, KeyError, TypeError) as exc:
-            raise SpeechError() from exc
+        except (SpeechError, OSError, TimeoutError, WebSocketException, ValueError, KeyError, TypeError) as exc:
+            _log_failure("Timbre", phase, exc)
+            raise SpeechError() from None
