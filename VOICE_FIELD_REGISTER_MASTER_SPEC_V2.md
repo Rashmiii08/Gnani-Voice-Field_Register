@@ -25,6 +25,21 @@ Build a browser-based, low-end-Android-friendly voice field register for ASHA wo
 **D — Safety, persistence, docs and pitch:** `backend/danger.py`, `backend/phrases.py`, `backend/db.py`, `tests/test_danger.py`, `scripts/delete_all_data.py`, `README.md`, `docs/demo_script.md`, `docs/pitch_outline.md`. Own verified danger-list citations, encrypted SQLite, deletion, safety testing, documentation, demo video/pitch coordination.
 **Shared setup** (lead approves): `.env.example`, `.gitignore`, `requirements.txt`, `backend/__init__.py`, `tests/conftest.py`. Everyone works in own branch and raises PRs; avoid simultaneous edits to shared files.
 
+### GitHub Collaboration Rules
+
+1. Role A must work on the `role-a` branch.
+2. Role B must work on the `role-b` branch.
+3. Role C must work on the `role-c` branch.
+4. Role D must work on the `role-d` branch.
+5. No teammate should push code directly to `main`.
+6. Each teammate must commit and push changes to their assigned branch.
+7. After testing their code, teammates must create a Pull Request (PR) targeting `main`.
+8. The Team Lead (Role A) reviews and merges Pull Requests.
+9. Do not modify another teammate's files without permission.
+10. All AI coding agents must follow these rules.
+
+
+
 ## 4. Canonical repo tree
 ```
 voice-field-register/
