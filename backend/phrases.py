@@ -1,49 +1,42 @@
-"""
-Fixed, non-LLM-generated user-facing phrases for English and Hindi.
-Review translations with fluent speakers before real-world deployment.
-"""
+﻿"""Fixed, safe referral phrases for English and Hindi."""
 
-PHRASES = {
+REFERRAL_PHRASES = {
     "en": {
-        "welcome": "Hello. I can help you record the visit.",
-        "disclosure": "I am an AI assistant, not a human.",
-        "listening": "I am listening.",
-        "confirm": "Please confirm the information.",
-        "saved": "The information has been saved.",
-        "danger_alert": "A possible danger sign has been detected.",
-        "refer_now": (
-            "A possible danger sign has been detected. "
-            "Please arrange immediate referral to the nearest appropriate health facility "
-            "and follow your approved local referral protocol."
+        "urgent": (
+            "Your response needs prompt attention. "
+            "Please contact a qualified healthcare worker "
+            "or visit the nearest health facility."
         ),
-        "connection_lost": "Connection lost. Your current form is saved on this device.",
-        "reconnecting": "Reconnecting. Please wait.",
+        "emergency": (
+            "This may require emergency help. "
+            "Please contact local emergency services or go "
+            "to the nearest emergency department now."
+        ),
+        "general": (
+            "I cannot diagnose or recommend treatment. "
+            "Please discuss this with a qualified healthcare worker."
+        ),
     },
     "hi": {
-        "welcome": "नमस्ते। मैं आपकी विज़िट की जानकारी दर्ज करने में मदद कर सकता हूँ।",
-        "disclosure": "मैं एक AI सहायक हूँ, इंसान नहीं।",
-        "listening": "मैं सुन रहा हूँ।",
-        "confirm": "कृपया जानकारी की पुष्टि करें।",
-        "saved": "जानकारी सुरक्षित कर दी गई है।",
-        "danger_alert": "संभावित खतरे का संकेत मिला है।",
-        "refer_now": (
-            "संभावित खतरे का संकेत मिला है। कृपया तुरंत निकटतम उपयुक्त स्वास्थ्य केंद्र "
-            "से संपर्क करें और स्वीकृत स्थानीय रेफरल प्रक्रिया का पालन करें।"
+        "urgent": (
+            "आपके जवाब पर जल्द ध्यान देने की जरूरत हो सकती है। "
+            "कृपया स्वास्थ्य कर्मचारी से संपर्क करें या नजदीकी स्वास्थ्य केंद्र जाएं।"
         ),
-        "connection_lost": "कनेक्शन टूट गया है। आपकी मौजूदा जानकारी इस डिवाइस पर सुरक्षित है।",
-        "reconnecting": "दोबारा कनेक्ट किया जा रहा है। कृपया प्रतीक्षा करें।",
+        "emergency": (
+            "इस स्थिति में आपातकालीन सहायता की जरूरत हो सकती है। "
+            "कृपया तुरंत स्थानीय आपातकालीन सेवा से संपर्क करें "
+            "या नजदीकी अस्पताल के आपातकालीन विभाग में जाएं।"
+        ),
+        "general": (
+            "मैं बीमारी की पहचान या इलाज की सलाह नहीं दे सकता। "
+            "कृपया योग्य स्वास्थ्य कर्मचारी से बात करें।"
+        ),
     },
 }
 
 
-def get_phrase(language: str, key: str) -> str:
-    """Return a fixed phrase; safely fall back to English."""
-    lang = (language or "en").lower()
-    if lang not in PHRASES:
-        lang = "en"
-    return PHRASES[lang].get(key, PHRASES["en"].get(key, key))
-
-
-if __name__ == "__main__":
-    print(get_phrase("en", "disclosure"))
-    print(get_phrase("hi", "refer_now"))
+def get_referral_phrase(language="en", level="general"):
+    """Return a fixed referral phrase in the selected language."""
+    language = language if language in REFERRAL_PHRASES else "en"
+    level = level if level in REFERRAL_PHRASES[language] else "general"
+    return REFERRAL_PHRASES[language][level]

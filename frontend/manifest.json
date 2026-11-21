@@ -1,0 +1,10 @@
+{
+    "name": "Gnani Voice Field Register",
+    "short_name": "Gnani Register",
+    "description": "AI-powered voice field registration application",
+    "start_url": "/",
+    "display": "standalone",
+    "background_color": "#f1f5f4",
+    "theme_color": "#123b35",
+    "icons": []
+}
