@@ -1,0 +1,50 @@
+
+[
+  {
+    "id": "KN001",
+    "language": "kn",
+    "expected": {
+      "beneficiary_id": "BEN001",
+      "visit_type": "antenatal",
+      "weight_kg": 55,
+      "next_visit_date": "2026-11-28"
+    }
+  },
+  {
+    "id": "KN002",
+    "language": "kn",
+    "expected": {
+      "beneficiary_id": "BEN002",
+      "visit_type": "postnatal",
+      "weight_kg": 50
+    }
+  },
+  {
+    "id": "HI001",
+    "language": "hi",
+    "expected": {
+      "beneficiary_id": "BEN003",
+      "visit_type": "newborn",
+      "temperature_c": 36.5
+    }
+  },
+  {
+    "id": "EN001",
+    "language": "en",
+    "expected": {
+      "beneficiary_id": "BEN004",
+      "visit_type": "immunisation",
+      "vaccinations_due": ["BCG", "OPV"]
+    }
+  },
+  {
+    "id": "EN002",
+    "language": "en",
+    "expected": {
+      "beneficiary_id": "BEN005",
+      "visit_type": "other",
+      "bp_systolic": 120,
+      "bp_diastolic": 80
+    }
+  }
+]

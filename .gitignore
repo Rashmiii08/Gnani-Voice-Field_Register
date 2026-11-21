@@ -221,3 +221,11 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Team B temporary test files
+assets/test_actual.json
+*.bak
+
+# Team B local database and temporary files
+data/
+*.backup
