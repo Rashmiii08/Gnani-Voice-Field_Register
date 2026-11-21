@@ -22,6 +22,8 @@ wire_logger.setLevel(logging.WARNING)
 PRISMA_URL = "wss://api.vachana.ai/stt/v3/stream"
 TIMBRE_URL = "wss://api.vachana.ai/api/v1/tts"
 PCM_FRAME_BYTES = 1024
+PCM_SAMPLE_RATE = 16000
+PRISMA_TAIL_FRAMES = 16  # 512 ms, matching the successful synthetic-audio check.
 LANGUAGE_CODES = {"hi": "hi-IN", "en": "en-IN"}
 
 
@@ -112,12 +114,14 @@ async def _send_audio(socket, audio: AsyncIterator[bytes]) -> None:
     pending = bytearray()
     loop = asyncio.get_running_loop()
     next_frame = loop.time()
+    frames = 0
 
     async def send_frame(frame: bytes) -> None:
-        nonlocal next_frame
+        nonlocal next_frame, frames
         await asyncio.sleep(max(0, next_frame - loop.time()))
         next_frame = loop.time() + 0.032
         await socket.send(frame)
+        frames += 1
 
     async for chunk in audio:
         pending.extend(chunk)
@@ -126,7 +130,15 @@ async def _send_audio(socket, audio: AsyncIterator[bytes]) -> None:
             del pending[:PCM_FRAME_BYTES]
     if pending:
         await send_frame(bytes(pending).ljust(PCM_FRAME_BYTES, b"\0"))
+    if frames:
+        # Give VAD the same end-of-speech boundary as the synthetic probe.
+        # Pace the padding just like microphone frames and keep receiving.
+        for _ in range(PRISMA_TAIL_FRAMES):
+            await send_frame(bytes(PCM_FRAME_BYTES))
     await socket.send(json.dumps({"type": "commit"}))
+    logger.info("Gnani Prisma audio sample_rate=%d channels=1 frames=%d bytes=%d tail_frames=%d",
+                PCM_SAMPLE_RATE, frames, frames * PCM_FRAME_BYTES,
+                PRISMA_TAIL_FRAMES if frames else 0)
 
 
 async def _receive_transcripts(socket, committed: asyncio.Event) -> str:
@@ -200,7 +212,7 @@ class GnaniSpeech:
             "x-api-key-id": self._api_key,
             "model": "prisma-v3.0",
             "language_code": LANGUAGE_CODES[language],
-            "x-sample-rate": "16000",
+            "x-sample-rate": str(PCM_SAMPLE_RATE),
         }
         if not minimal:
             headers["format"] = "transcribe"

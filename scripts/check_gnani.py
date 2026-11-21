@@ -45,7 +45,8 @@ async def main(*, prisma_init_only: bool = False) -> int:
         else:
             print("Timbre: completed without audio.")
     has_tts_audio = bool(audio)
-    audio.extend(bytes(16000))
+    if not audio:
+        audio.extend(bytes(16000))
 
     async def chunks():
         for offset in range(0, len(audio), 3200):

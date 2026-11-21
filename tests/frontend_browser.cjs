@@ -63,6 +63,12 @@ async function main() {
         constructor(...args) { super(...args); window.testSocket = this; }
       };
     });
+    const microphoneSummaries = [];
+    page.on("console", async (message) => {
+      if (message.text().startsWith("Microphone capture")) {
+        microphoneSummaries.push(await message.args()[1].jsonValue());
+      }
+    });
     const sent = [];
     const received = [];
     const browserErrors = [];
@@ -92,6 +98,11 @@ async function main() {
     assert.deepEqual(received[0], { type: "ready", session_id: sent[0].session_id });
     assert(sent.some((frame) => frame.type === "end_utterance"));
     const audio = sent.filter((frame) => frame.type === "audio");
+    assert(microphoneSummaries.length >= 1);
+    assert.equal(microphoneSummaries[0].outputSampleRate, 16000);
+    assert.equal(microphoneSummaries[0].outputChannels, 1);
+    assert(microphoneSummaries[0].rms > 0);
+    assert(microphoneSummaries[0].bytes > 0);
     assert(audio.length >= 2);
     audio.forEach((frame, index) => assert.equal(frame.seq, index + 1));
     const pcm = Buffer.from(audio[0].data, "base64");

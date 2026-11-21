@@ -186,7 +186,8 @@ def test_prisma_v3_wire_frames_and_commit():
     assert asyncio.run(provider.transcribe(chunks(), "hi")) == "Synthetic visit"
     assert sent[0] == b"\x01\x00" * 512
     assert sent[1] == b"\x01\x00" * 88 + b"\x02\x00" * 100 + bytes(648)
-    assert json.loads(sent[2]) == {"type": "commit"}
+    assert sent[2:-1] == [bytes(1024)] * 16
+    assert json.loads(sent[-1]) == {"type": "commit"}
 
 
 def test_timbre_v3_wire_requests_raw_pcm_and_decodes_vendor_chunks():

@@ -6,16 +6,19 @@ import os
 from collections.abc import Awaitable, Callable
 from contextlib import aclosing
 from dataclasses import dataclass, field
+from math import sqrt
 from pathlib import Path
+from struct import iter_unpack
 from time import monotonic
 from typing import Any
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, status
 from fastapi.staticfiles import StaticFiles
 
-from backend.gnani_adapter import GnaniSpeech, SpeechError, SpeechProvider
+from backend.gnani_adapter import PCM_SAMPLE_RATE, GnaniSpeech, SpeechError, SpeechProvider
 
 logger = logging.getLogger(__name__)
+audio_logger = logging.getLogger("uvicorn.error").getChild("capture")
 RETRY = "Please reconnect or retry"
 SESSION_TTL = 300
 MAX_SESSIONS = 128
@@ -55,6 +58,25 @@ class Utterance:
     queue: asyncio.Queue = field(default_factory=lambda: asyncio.Queue(maxsize=24))
     ended_at: float | None = None
     last_audio_at: float = field(default_factory=monotonic)
+
+    chunk_count: int = 0
+    bytes_received: int = 0
+    sum_squares: int = 0
+    peak: int = 0
+
+    def note_audio(self, pcm: bytes) -> None:
+        self.chunk_count += 1
+        self.bytes_received += len(pcm)
+        for (sample,) in iter_unpack("<h", pcm):
+            self.sum_squares += sample * sample
+            self.peak = max(self.peak, abs(sample))
+
+    def log_audio(self) -> None:
+        rms = sqrt(self.sum_squares / max(1, self.bytes_received // 2)) / 32768
+        audio_logger.info(
+            "Browser audio sample_rate=%d channels=1 chunks=%d bytes=%d rms=%.5f peak=%.5f",
+            PCM_SAMPLE_RATE, self.chunk_count, self.bytes_received, rms, self.peak / 32768,
+        )
 
     async def chunks(self):
         while (chunk := await self.queue.get()) is not None:
@@ -157,6 +179,7 @@ class Connection:
             return
 
         if not text:
+            audio_logger.info("Prisma returned no transcript for browser audio")
             await self.error("NO_SPEECH")
             return
         await self.send({"type": "transcript", "text": text, "final": True})
@@ -224,6 +247,7 @@ class Connection:
             await self.finish_input()
             await self.error("AUDIO_BACKPRESSURE")
             return
+        self.utterance.note_audio(pcm)
         self.last_seq = seq
         self.utterance.last_audio_at = monotonic()
 
@@ -231,6 +255,7 @@ class Connection:
         if self.utterance is None or self.utterance.ended_at is not None or self.input_task.done():
             return
         self.utterance.ended_at = monotonic()
+        self.utterance.log_audio()
         try:
             self.utterance.queue.put_nowait(None)
         except asyncio.QueueFull:

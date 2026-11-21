@@ -322,6 +322,16 @@ function streamChunk(buffer) {
 }
 
 function captureChunk(active, buffer) {
+  const pcm = new DataView(buffer);
+  let squares = 0;
+  for (let i = 0; i < pcm.byteLength; i += 2) {
+    const sample = Math.abs(pcm.getInt16(i, true)) / 32768;
+    squares += sample ** 2;
+    active.peak = Math.max(active.peak, sample);
+  }
+  active.chunks += 1;
+  active.bytes += pcm.byteLength;
+  active.sumSquares += squares;
   if (!playing.size) {
     for (const recent of active.voiceFrames) streamChunk(recent);
     active.voiceFrames = [];
@@ -329,11 +339,9 @@ function captureChunk(active, buffer) {
     return;
   }
   // Require three consecutive loud frames while playback overlaps capture.
-  const pcm = new DataView(buffer);
-  let squares = 0;
-  for (let i = 0; i < pcm.byteLength; i += 2) squares += (pcm.getInt16(i, true) / 32768) ** 2;
   const rms = Math.sqrt(squares / (pcm.byteLength / 2));
   if (rms < 0.075) {
+    active.suppressedChunks += active.voiceFrames.length + 1;
     active.voiceFrames = [];
     return;
   }
@@ -351,7 +359,10 @@ async function startRecording() {
   starting = true;
   errorKey = "";
   clearTimeout(reconnectTimer);
-  const active = {voiceFrames: [], stopping: false};
+  const active = {
+    voiceFrames: [], stopping: false, chunks: 0, bytes: 0,
+    sumSquares: 0, peak: 0, suppressedChunks: 0,
+  };
   capture = active;
   render();
   try {
@@ -372,6 +383,12 @@ async function startRecording() {
       return;
     }
     active.stream = stream;
+    const track = stream.getAudioTracks()[0];
+    const settings = track.getSettings();
+    active.input = {
+      trackSampleRate: settings.sampleRate, trackChannels: settings.channelCount,
+      contextSampleRate: audioContext.sampleRate, muted: track.muted,
+    };
     active.startSequence = sequence;
     workletSession ||= audioContext.audioWorklet.addModule("./audio-worklet.js").catch((error) => {
       workletSession = null;
@@ -404,12 +421,19 @@ async function startRecording() {
 
 function finishRecording(active) {
   if (capture !== active) return;
+  console.info("Microphone capture", {
+    ...active.input, outputSampleRate: sampleRate, outputChannels: 1,
+    chunks: active.chunks, bytes: active.bytes, sentChunks: sequence - active.startSequence,
+    suppressedChunks: active.suppressedChunks + active.voiceFrames.length,
+    rms: Math.sqrt(active.sumSquares / Math.max(1, active.bytes / 2)), peak: active.peak,
+  });
   releaseCapture();
   if (sequence > active.startSequence && send({type: "end_utterance"})) {
     waiting = true;
     setStatus("processing");
   } else {
     setStatus(ready ? "ready" : "disconnected");
+    if (ready) showError("noSpeech");
   }
 }
 
