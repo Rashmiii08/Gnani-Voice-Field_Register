@@ -1,0 +1,11 @@
+
+{
+  "name": "Voice Field Register",
+  "short_name": "Voice Register",
+  "description": "AI-powered Voice Field Register",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#f1f5f9",
+  "theme_color": "#123456",
+  "orientation": "portrait"
+}
